@@ -26,7 +26,12 @@ import {
   type Filters,
   type Opportunity,
 } from "../lib/opportunities";
-import type { Feed } from "../lib/dibbs";
+type Listing = {
+  date: string;
+  total: number;
+  fetchedAt: string | null;
+  stored: boolean;
+};
 const formatDate = (value: string | null) =>
   value
     ? new Date(value + "T12:00:00").toLocaleDateString("en-US", {
@@ -36,8 +41,10 @@ const formatDate = (value: string | null) =>
     : "Not provided";
 export default function Home() {
   const [rows, setRows] = useState<Opportunity[]>([]),
-    [feed, setFeed] = useState<Feed | null>(null),
-    [loading, setLoading] = useState(false),
+    [listing, setListing] = useState<Listing | null>(null),
+    [dates, setDates] = useState<string[]>([]),
+    [syncing, setSyncing] = useState(false),
+    [ready, setReady] = useState(false),
     [error, setError] = useState(""),
     [filters, setFilters] = useState<Filters>(initialFilters),
     [view, setView] = useState("all"),
@@ -46,14 +53,13 @@ export default function Home() {
     [sort, setSort] = useState("due"),
     [selected, setSelected] = useState<Opportunity | null>(null);
   const run = useRef(0);
-  const stop = useRef(false);
   const search = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     try {
       setSaved(JSON.parse(localStorage.getItem("patriotbid-saved") || "[]"));
     } catch {}
-    void sync();
+    void open();
     return () => {
       run.current++;
     };
@@ -68,37 +74,143 @@ export default function Home() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
-  async function sync(date?: string, resume = false) {
+  function applyListing(data: {
+    date?: string;
+    rows?: Opportunity[];
+    total?: number;
+    fetchedAt?: string | null;
+    stored?: boolean;
+    dates?: string[];
+  }) {
+    if (data.dates?.length) setDates(data.dates);
+    setListing({
+      date: data.date || "",
+      total: data.total || 0,
+      fetchedAt: data.fetchedAt || null,
+      stored: !!data.stored,
+    });
+    setRows(data.rows || []);
+    setPage(1);
+  }
+  async function open(date?: string) {
     const id = ++run.current;
-    stop.current = false;
-    setLoading(true);
     setError("");
-    let all: Opportunity[] = resume ? rows : [];
-    const startPage = resume && feed ? feed.page + 1 : 1;
+    const response = await fetch(
+      `/api/opportunities${date ? `?date=${encodeURIComponent(date)}` : ""}`,
+      { cache: "no-store" },
+    );
+    const data = await response.json();
+    if (id !== run.current) return;
+    if (!response.ok) {
+      setError(data.message || "Could not open the saved listing.");
+      setReady(true);
+      return;
+    }
+    if (data.date) applyListing(data);
+    setReady(true);
+    if (data.date && !data.stored) void pull(data.date, id, false);
     try {
-      for (let sourcePage = startPage; sourcePage <= 200; sourcePage++) {
+      const listed = await fetch("/api/dates", { cache: "no-store" });
+      const body = await listed.json();
+      if (id !== run.current) return;
+      if (!listed.ok && !body.dates?.length)
+        throw new Error(body.message || "Could not load issue dates.");
+      if (body.dates?.length) setDates(body.dates);
+      if (!data.date && body.dates?.[0]) {
+        const next = await fetch(
+          `/api/opportunities?date=${encodeURIComponent(body.dates[0])}`,
+          { cache: "no-store" },
+        );
+        const day = await next.json();
+        if (id !== run.current) return;
+        if (!next.ok)
+          throw new Error(day.message || "Could not open the saved listing.");
+        applyListing({ ...day, date: body.dates[0] });
+        if (!day.stored) void pull(body.dates[0], id, false);
+      }
+    } catch (e) {
+      if (id === run.current && !data.date)
+        setError(
+          e instanceof Error ? e.message : "Could not load issue dates.",
+        );
+    }
+  }
+  async function choose(date: string) {
+    if (date === listing?.date) return;
+    const id = ++run.current;
+    setError("");
+    setSyncing(false);
+    const response = await fetch(
+      `/api/opportunities?date=${encodeURIComponent(date)}`,
+      { cache: "no-store" },
+    );
+    const data = await response.json();
+    if (id !== run.current) return;
+    if (!response.ok) {
+      setError(data.message || "Could not open this date.");
+      return;
+    }
+    applyListing({ ...data, date });
+    if (!data.stored) void pull(date, id, false);
+  }
+  async function pull(date: string, id: number, keepCurrent: boolean) {
+    setSyncing(true);
+    setError("");
+    let all: Opportunity[] = [];
+    let total = 0;
+    let pages = 1;
+    let fetchedAt = new Date().toISOString();
+    let source = "";
+    let issueDates: string[] = [];
+    try {
+      for (let sourcePage = 1; sourcePage <= 200; sourcePage++) {
         const response = await fetch(
-          `/api/opportunities?page=${sourcePage}${date ? `&date=${date}` : ""}`,
+          `/api/opportunities?page=${sourcePage}&date=${encodeURIComponent(date)}`,
+          { cache: "no-store" },
         );
         const data = await response.json();
         if (id !== run.current) return;
         if (!response.ok)
           throw new Error(data.message || "Could not load DIBBS.");
-        const next = data as Feed;
-        date = next.date;
+        issueDates = data.dates?.length ? data.dates : issueDates;
+        if (issueDates.length) setDates(issueDates);
+        total = data.total;
+        pages = data.pages;
+        fetchedAt = data.fetchedAt;
+        source = data.source;
         all = [
-          ...new Map([...all, ...next.rows].map((r) => [r.id, r])).values(),
+          ...new Map([...all, ...data.rows].map((r) => [r.id, r])).values(),
         ];
-        setRows(all);
-        setFeed(next);
-        if (sourcePage === 1) setPage(1);
-        if (sourcePage >= next.pages || stop.current) break;
+        if (!keepCurrent) {
+          setRows(all);
+          if (sourcePage === 1) setPage(1);
+        }
+        if (sourcePage >= data.pages) break;
       }
+      const save = await fetch("/api/opportunities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date,
+          rows: all,
+          total,
+          pages,
+          fetchedAt,
+          source,
+          dates: issueDates,
+        }),
+      });
+      const saved = await save.json();
+      if (id !== run.current) return;
+      if (!save.ok) throw new Error(saved.message || "Could not save this date.");
+      setRows(all);
+      setListing({ date, total, fetchedAt, stored: true });
+      if (keepCurrent) setPage(1);
     } catch (e) {
       if (id === run.current)
         setError(e instanceof Error ? e.message : "Could not load DIBBS.");
     } finally {
-      if (id === run.current) setLoading(false);
+      if (id === run.current) setSyncing(false);
     }
   }
   function update<K extends keyof Filters>(key: K, value: Filters[K]) {
@@ -137,7 +249,10 @@ export default function Home() {
   const active = Object.entries(filters).filter(
     ([key, value]) => key !== "open" && !!value,
   ).length;
-  const complete = !!feed && feed.page >= feed.pages;
+  const dateOptions =
+    listing?.date && !dates.includes(listing.date)
+      ? [listing.date, ...dates]
+      : dates;
   function exportCsv() {
     const keys = [
       "title",
@@ -172,7 +287,7 @@ export default function Home() {
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = `dibbs-${feed?.date || "rfqs"}.csv`;
+    a.download = `dibbs-${listing?.date || "rfqs"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -254,15 +369,14 @@ export default function Home() {
             </button>
             <button
               className="button primary"
-              disabled={loading}
-              onClick={() => void sync(feed?.date, !!feed && !complete)}
+              disabled={syncing || !listing?.date}
+              onClick={() => {
+                if (!listing?.date) return;
+                void pull(listing.date, ++run.current, true);
+              }}
             >
-              <RefreshCw size={16} className={loading ? "spin" : ""} />
-              {loading
-                ? "Importing RFQs…"
-                : feed && !complete
-                  ? "Resume import"
-                  : "Sync DIBBS"}
+              <RefreshCw size={16} className={syncing ? "spin" : ""} />
+              {syncing ? "Updating…" : "Update"}
             </button>
           </div>
         </section>
@@ -271,25 +385,23 @@ export default function Home() {
             <span className="stat-label">
               RFQs in this listing <Layers3 size={18} />
             </span>
-            <strong>{feed?.total.toLocaleString() ?? "—"}</strong>
+            <strong>
+              {(listing?.stored ? listing.total : rows.length).toLocaleString()}
+            </strong>
             <small>
-              {feed
-                ? `Issued ${feed.date.replaceAll("-", " / ")}`
-                : "Connecting to DIBBS"}
+              {listing?.date
+                ? `Issued ${listing.date.replaceAll("-", " / ")}`
+                : ready
+                  ? "Select an issue date"
+                  : "Loading issue dates"}
             </small>
           </div>
           <div>
             <span className="stat-label">
-              Loaded opportunities <PackageOpen size={18} />
+              Opportunities <PackageOpen size={18} />
             </span>
             <strong>{rows.length.toLocaleString()}</strong>
-            <small>
-              {complete
-                ? "All source pages checked"
-                : loading
-                  ? "Importing remaining source pages…"
-                  : "From the DIBBS source"}
-            </small>
+            <small>Saved for this issue date</small>
           </div>
           <div>
             <span className="stat-label">
@@ -299,7 +411,7 @@ export default function Home() {
               {dueSoon.toLocaleString()}
               <span className="stat-tag">Time sensitive</span>
             </strong>
-            <small>Among loaded opportunities</small>
+            <small>In this listing</small>
           </div>
           <div>
             <span className="stat-label">
@@ -328,13 +440,16 @@ export default function Home() {
             <label>
               Issue date
               <select
-                value={feed?.date || ""}
-                disabled={loading || !feed}
-                onChange={(e) => void sync(e.target.value)}
+                aria-label="Issue date"
+                value={listing?.date || ""}
+                disabled={!dateOptions.length}
+                onChange={(e) => void choose(e.target.value)}
               >
-                {!feed && <option>Latest available</option>}
-                {feed?.dates.map((d) => (
-                  <option key={d}>{d}</option>
+                {!dateOptions.length && <option value="">Loading dates…</option>}
+                {dateOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
                 ))}
               </select>
             </label>
@@ -461,58 +576,30 @@ export default function Home() {
                 </h2>
                 <p>
                   {active
-                    ? `${active} active filter${active === 1 ? "" : "s"} · `
-                    : ""}
-                  {complete
-                    ? "Across imported source pages"
-                    : `Searching ${rows.length} loaded records${feed ? ` of ${feed.total}` : ""}`}
+                    ? `${active} active filter${active === 1 ? "" : "s"}`
+                    : listing?.date
+                      ? `Issue date ${listing.date.replaceAll("-", " / ")}`
+                      : "Choose an issue date"}
                 </p>
               </div>
               <span className="open-tag">
                 <span className="dot" />
-                {loading
-                  ? "Importing"
-                  : complete
-                    ? "Up to date"
-                    : "DIBBS source"}
+                {syncing ? "Updating" : listing?.stored ? "Saved" : "DIBBS"}
               </span>
             </div>
-            {loading && (
-              <div className="import-status" role="status">
-                <RefreshCw size={14} className="spin" />
-                <span>
-                  {feed
-                    ? `Importing page ${Math.min(feed.page + 1, feed.pages)} of ${feed.pages}. You can browse while the rest arrives.`
-                    : "Establishing a DIBBS session and fetching the latest issue date…"}
-                </span>
-                <button
-                  onClick={() => {
-                    stop.current = true;
-                  }}
-                >
-                  Stop after this page
-                </button>
-              </div>
-            )}
             {error && (
               <div className="error" role="alert">
-                <strong>Import interrupted</strong>
-                <span>
-                  {error}{" "}
-                  {rows.length > 0 ? "Loaded records remain available." : ""}
-                </span>
+                <strong>Could not load this date</strong>
+                <span>{error}</span>
                 <button
-                  disabled={loading}
-                  onClick={() => void sync(feed?.date, !!feed && !complete)}
+                  disabled={syncing || !listing?.date}
+                  onClick={() => {
+                    if (!listing?.date) return;
+                    void pull(listing.date, ++run.current, rows.length > 0);
+                  }}
                 >
-                  Retry import
+                  Try again
                 </button>
-              </div>
-            )}
-            {!loading && !complete && rows.length > 0 && !error && (
-              <div className="import-status">
-                Partial listing · {rows.length} records loaded. Sync DIBBS to
-                import the full day.
               </div>
             )}
             <div className="table-scroll">
@@ -621,18 +708,18 @@ export default function Home() {
               <div className="empty">
                 <Search size={30} />
                 <h3>
-                  {loading
-                    ? "Finding your opportunities…"
+                  {!ready || (syncing && !rows.length)
+                    ? "Loading this issue date"
                     : error && !rows.length
-                      ? "DIBBS could not be reached"
+                      ? "This date could not be loaded"
                       : "No matching opportunities"}
                 </h3>
                 <p>
-                  {loading
-                    ? "Real RFQs will appear as soon as the first page arrives."
+                  {!ready || (syncing && !rows.length)
+                    ? "The list will show here as soon as this date is ready."
                     : "Try a different search, reset the filters, or select another issue date."}
                 </p>
-                {!loading && (
+                {ready && !syncing && (
                   <button
                     className="button"
                     onClick={() => {
@@ -676,8 +763,8 @@ export default function Home() {
         <footer>
           <span>
             <Radio size={13} /> Public data from DLA DIBBS{" "}
-            {feed &&
-              `· Retrieved ${new Date(feed.fetchedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
+            {listing?.fetchedAt &&
+              `· Saved ${new Date(listing.fetchedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
           </span>
           <span>Built for suppliers. Focused on opportunity.</span>
         </footer>

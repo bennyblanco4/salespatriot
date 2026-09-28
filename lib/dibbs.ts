@@ -72,6 +72,26 @@ export function parseRfqHtml(html: string, base = SOURCE): Opportunity[] {
   });
   return [...new Map(rows.map((r) => [r.id, r])).values()];
 }
+export function readIssueLinks(html: string) {
+  const $ = cheerio.load(html);
+  const links = $("a[href]")
+    .map((_, a) => $(a).attr("href")!)
+    .get()
+    .filter((h) => /RfqRecs\.aspx\?category=issue/i.test(h));
+  const dates = [
+    ...new Set(
+      links
+        .map((h) => new URL(h, SOURCE).searchParams.get("Value"))
+        .filter((s): s is string => !!s),
+    ),
+  ];
+  return { links, dates };
+}
+export async function listIssueDates(): Promise<string[]> {
+  const session = new DibbsSession();
+  const listing = await session.page(SOURCE);
+  return readIssueLinks(listing.html).dates;
+}
 export function formFields(html: string) {
   const $ = cheerio.load(html);
   const data = new URLSearchParams();
@@ -168,18 +188,7 @@ async function fetchDailyRfqsInternal(
   if (!saved) {
     const session = new DibbsSession();
     const listing = await session.page(SOURCE);
-    const $ = cheerio.load(listing.html);
-    const links = $("a[href]")
-      .map((_, a) => $(a).attr("href")!)
-      .get()
-      .filter((h) => /RfqRecs\.aspx\?category=issue/i.test(h));
-    const dates = [
-      ...new Set(
-        links
-          .map((h) => new URL(h, SOURCE).searchParams.get("Value"))
-          .filter((s): s is string => !!s),
-      ),
-    ];
+    const { links, dates } = readIssueLinks(listing.html);
     const selected = issueDate || dates[0];
     if (!selected || !dates.includes(selected))
       throw new Error("No daily listing is available for this date.");
@@ -241,9 +250,7 @@ async function fetchDailyRfqsInternal(
       fields.set("__EVENTARGUMENT", `Page$${action}`);
       html = (await saved.session.page(saved.url, fields)).html;
       if (!cheerio.load(html)('[id$="_lblRecCount"]').length)
-        throw new Error(
-          "DIBBS interrupted pagination. Please retry the import.",
-        );
+        throw new Error("DIBBS interrupted this page. Please try again.");
       saved.html = html;
       saved.at = Date.now();
       if (action === String(page) || action === "Last") break;
@@ -257,7 +264,7 @@ async function fetchDailyRfqsInternal(
     Number($("tr.pagination").first().find("span").first().text()) || 1;
   if (actualPage !== page)
     throw new Error(
-      "DIBBS returned a different page. Please retry the import.",
+      "DIBBS returned a different page. Please try again.",
     );
   const rows = parseRfqHtml(html, saved.url);
   if (!rows.length && total !== 0)
