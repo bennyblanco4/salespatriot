@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import type { Opportunity } from "./opportunities";
+import { pdfLink, type Opportunity } from "./opportunities";
 export const SOURCE =
   "https://www.dibbs.bsm.dla.mil/RFQ/RFQDates.aspx?category=issue";
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -10,9 +10,8 @@ function date(s: string): string | null {
 export function safeLink(href: string, base = SOURCE): string | null {
   try {
     const u = new URL(href, base);
-    return u.protocol === "https:" && u.hostname === "www.dibbs.bsm.dla.mil"
-      ? u.href
-      : null;
+    const hosts = new Set(["www.dibbs.bsm.dla.mil", "dibbs2.bsm.dla.mil"]);
+    return u.protocol === "https:" && hosts.has(u.hostname) ? u.href : null;
   } catch {
     return null;
   }
@@ -32,6 +31,11 @@ export function parseRfqHtml(html: string, base = SOURCE): Opportunity[] {
       .first()
       .attr("href");
     const url = href ? safeLink(href, base) : null;
+    const pdfHref = sol
+      .find("a[href]")
+      .filter((_, a) => /\.pdf(?:$|\?)/i.test($(a).attr("href") || ""))
+      .first()
+      .attr("href");
     if (!solicitation || !nsn || !url) return;
     const aside = sol
       .find("img")
@@ -68,6 +72,7 @@ export function parseRfqHtml(html: string, base = SOURCE): Opportunity[] {
       status:
         normalize(field("lblStatus").find("span").first().text()) || "Unknown",
       url,
+      pdf: (pdfHref ? safeLink(pdfHref, base) : null) || pdfLink(solicitation),
     });
   });
   return [...new Map(rows.map((r) => [r.id, r])).values()];

@@ -13,7 +13,14 @@ export type Opportunity = {
   due: string | null;
   docs: boolean | null;
   url: string;
+  pdf?: string | null;
 };
+export function pdfLink(solicitation: string): string | null {
+  const id = solicitation.replace(/[^A-Za-z0-9]/g, "");
+  if (!/^[A-Z0-9]{13,}$/i.test(id)) return null;
+  const name = id.toUpperCase();
+  return `https://dibbs2.bsm.dla.mil/Downloads/RFQ/${name.slice(-1)}/${name}.PDF`;
+}
 export function daysLeft(
   date: string | null,
   today = new Intl.DateTimeFormat("en-CA", {
@@ -23,6 +30,17 @@ export function daysLeft(
   return date
     ? Math.round((Date.parse(date) - Date.parse(today)) / 86400000)
     : null;
+}
+export function isPastIssueDate(
+  date: string,
+  today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+  }).format(new Date()),
+) {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(date);
+  if (!match) return false;
+  const left = daysLeft(`${match[3]}-${match[1]}-${match[2]}`, today);
+  return left !== null && left < 0;
 }
 export type Filters = {
   search: string;
@@ -40,7 +58,7 @@ export const initialFilters: Filters = {
   due: "",
   docs: false,
   quantity: "",
-  open: true,
+  open: false,
 };
 export function filterRows(rows: Opportunity[], f: Filters) {
   return rows.filter((r) => {
@@ -53,7 +71,7 @@ export function filterRows(rows: Opportunity[], f: Filters) {
           .includes(q)) &&
       (!f.fsc || r.fsc === f.fsc) &&
       (!f.setAside || r.setAside === f.setAside) &&
-      (!f.due || (days !== null && days >= 0 && days <= Number(f.due))) &&
+      (!f.due || r.due === f.due) &&
       (!f.docs || r.docs === true) &&
       (!f.quantity ||
         (r.quantity !== null && r.quantity >= Number(f.quantity))) &&

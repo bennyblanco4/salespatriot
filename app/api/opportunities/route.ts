@@ -1,6 +1,12 @@
 import { fetchDailyRfqs, type Feed } from "../../../lib/dibbs";
 import type { Opportunity } from "../../../lib/opportunities";
-import { loadDates, loadDay, saveDates, saveDay } from "../../../lib/store";
+import {
+  loadDates,
+  loadDay,
+  saveDates,
+  saveDay,
+  savedPastDay,
+} from "../../../lib/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -33,6 +39,22 @@ export async function GET(request: Request) {
       return Response.json(
         { message: "Invalid date or page." },
         { status: 400 },
+      );
+    const saved = date ? savedPastDay(date) : null;
+    if (saved)
+      return Response.json(
+        {
+          stored: true,
+          skipped: true,
+          date: saved.date,
+          rows: saved.rows,
+          total: saved.total,
+          pages: 1,
+          fetchedAt: saved.fetchedAt,
+          source: saved.source,
+          dates: loadDates(),
+        },
+        { headers: { "Cache-Control": "no-store" } },
       );
     const key = `${date || "latest"}:${page}`;
     const entry = cache.get(key);
@@ -97,6 +119,17 @@ export async function POST(request: Request) {
   if (!Array.isArray(data.rows) || data.rows.length > 20000)
     return Response.json({ message: "Invalid listing." }, { status: 400 });
   const rows = data.rows.filter(isOpportunity);
+  const existing = savedPastDay(data.date);
+  if (existing)
+    return Response.json(
+      {
+        ok: true,
+        skipped: true,
+        date: existing.date,
+        count: existing.rows.length,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   saveDay({
     date: data.date,
     rows,

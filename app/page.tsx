@@ -1,28 +1,37 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownUp,
   ArrowUpRight,
   Bookmark,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
   FileText,
   Filter,
-  Layers3,
+  Building2,
+  CalendarDays,
+  Clock3,
+  Heart,
+  MapPin,
+  Medal,
+  PackageOpen,
+  Radio,
   RefreshCw,
   Search,
   ShieldCheck,
+  Unlock,
+  Users,
   X,
-  Clock3,
-  PackageOpen,
-  Radio,
+  type LucideIcon,
 } from "lucide-react";
 import {
   daysLeft,
   filterRows,
   initialFilters,
+  isPastIssueDate,
+  pdfLink,
   type Filters,
   type Opportunity,
 } from "../lib/opportunities";
@@ -32,6 +41,46 @@ type Listing = {
   fetchedAt: string | null;
   stored: boolean;
 };
+function setAsideName(value: string) {
+  return value.replace(/\s+set-aside$/i, "").trim();
+}
+function setAsideParts(value: string): { label: string; icon: LucideIcon }[] {
+  const text = value.toLowerCase();
+  const parts: { label: string; icon: LucideIcon }[] = [];
+  if (text.includes("veteran")) parts.push({ label: "Veteran", icon: Medal });
+  if (text.includes("woman"))
+    parts.push({ label: "Woman owned", icon: Heart });
+  if (text.includes("hubzone")) parts.push({ label: "HUBZone", icon: MapPin });
+  if (/8\s*\(?a\)?/.test(text)) parts.push({ label: "8(a)", icon: Building2 });
+  if (text.includes("small business"))
+    parts.push({ label: "Small business", icon: Users });
+  if (text.includes("unrestricted"))
+    parts.push({ label: "Unrestricted", icon: Unlock });
+  return parts;
+}
+function SetAsideLabel({ value }: { value: string }) {
+  const parts = setAsideParts(value);
+  const boxes =
+    parts.length > 0
+      ? parts
+      : [{ label: setAsideName(value) || "Not specified", icon: null }];
+  return (
+    <span className="set-asides">
+      {boxes.map((part) => {
+        const Icon = part.icon;
+        return (
+          <span
+            key={part.label}
+            className={`badge ${part.label === "Unrestricted" ? "neutral" : "blue"}`}
+          >
+            {Icon ? <Icon size={12} aria-hidden="true" /> : null}
+            {part.label}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 const formatDate = (value: string | null) =>
   value
     ? new Date(value + "T12:00:00").toLocaleDateString("en-US", {
@@ -39,6 +88,319 @@ const formatDate = (value: string | null) =>
         day: "numeric",
       })
     : "Not provided";
+const formatFullDate = (value: string) =>
+  new Date(value + "T12:00:00").toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+function issueToIso(value: string) {
+  const [month, day, year] = value.split("-");
+  return `${year}-${month}-${day}`;
+}
+function isoToIssue(value: string) {
+  const [year, month, day] = value.split("-");
+  return `${month}-${day}-${year}`;
+}
+function monthStart(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+}
+function toIso(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+function DateMenu({
+  label,
+  value,
+  onChange,
+  allowed,
+  emptyLabel,
+  clearLabel,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (iso: string) => void;
+  allowed?: string[];
+  emptyLabel?: string;
+  clearLabel?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const [cursor, setCursor] = useState(() =>
+    value ? monthStart(value) : new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  );
+  useEffect(() => {
+    if (open && value) setCursor(monthStart(value));
+  }, [open, value]);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const leading = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  const allowedSet = allowed ? new Set(allowed) : null;
+  return (
+    <div className="date-field" ref={root}>
+      <span>{label}</span>
+      <button
+        type="button"
+        className="date-button"
+        aria-label={label}
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{value ? formatFullDate(value) : emptyLabel}</span>
+        <CalendarDays size={14} />
+      </button>
+      {open && (
+        <div className="calendar" role="dialog" aria-label={`${label} calendar`}>
+          <div className="calendar-head">
+            <button
+              type="button"
+              aria-label="Previous month"
+              onClick={() => setCursor(new Date(year, month - 1, 1))}
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <strong>
+              {cursor.toLocaleDateString("en-US", {
+                month: "long",
+                year: "numeric",
+              })}
+            </strong>
+            <button
+              type="button"
+              aria-label="Next month"
+              onClick={() => setCursor(new Date(year, month + 1, 1))}
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+          <div className="calendar-week">
+            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+              <span key={day}>{day}</span>
+            ))}
+          </div>
+          <div className="calendar-grid">
+            {Array.from({ length: leading }, (_, index) => (
+              <span key={`empty-${index}`} />
+            ))}
+            {Array.from({ length: days }, (_, index) => {
+              const iso = toIso(new Date(year, month, index + 1));
+              const blocked = allowedSet ? !allowedSet.has(iso) : false;
+              return (
+                <button
+                  type="button"
+                  key={iso}
+                  disabled={blocked}
+                  className={iso === value ? "selected" : ""}
+                  onClick={() => {
+                    onChange(iso);
+                    setOpen(false);
+                  }}
+                >
+                  {index + 1}
+                </button>
+              );
+            })}
+          </div>
+          {clearLabel && (
+            <button
+              type="button"
+              className="calendar-clear"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+            >
+              {clearLabel}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+function OptionIcons({ icons }: { icons?: LucideIcon[] }) {
+  if (!icons?.length) return null;
+  return (
+    <span className="menu-icons">
+      {icons.map((Icon, index) => (
+        <Icon key={`${index}`} size={12} aria-hidden="true" />
+      ))}
+    </span>
+  );
+}
+function OptionMenu({
+  label,
+  value,
+  placeholder,
+  options,
+  onChange,
+  search,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: { value: string; label: string; icons?: LucideIcon[] }[];
+  onChange: (value: string) => void;
+  search?: boolean;
+}) {
+  const [open, setOpen] = useState(false),
+    [query, setQuery] = useState(""),
+    root = useRef<HTMLDivElement>(null),
+    searchBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    const frame = requestAnimationFrame(() => searchBox.current?.focus());
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", key);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  const selected = options.find((option) => option.value === value);
+  const needle = query.trim().toLowerCase();
+  const shown = options.filter(
+    (option) =>
+      !needle ||
+      option.label.toLowerCase().includes(needle) ||
+      option.value.toLowerCase().includes(needle),
+  );
+  return (
+    <div className="date-field" ref={root}>
+      <span>{label}</span>
+      <button
+        type="button"
+        className="date-button"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="menu-value">
+          {selected ? <OptionIcons icons={selected.icons} /> : null}
+          <span>{selected?.label || placeholder}</span>
+        </span>
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div className="option-menu" role="listbox" aria-label={label}>
+          {search && (
+            <input
+              ref={searchBox}
+              className="menu-search"
+              placeholder="Search"
+              value={query}
+              aria-label={`Search ${label}`}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          )}
+          <button
+            type="button"
+            className={value ? "" : "selected"}
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            {placeholder}
+          </button>
+          <div className="option-list">
+            {shown.map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                role="option"
+                aria-selected={option.value === value}
+                className={option.value === value ? "selected" : ""}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <OptionIcons icons={option.icons} />
+                <span>{option.label}</span>
+              </button>
+            ))}
+            {!shown.length && <p className="menu-empty">No matches</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+type Sort = { key: "title" | "quantity" | "docs" | "due"; dir: "asc" | "desc" };
+function compareRows(a: Opportunity, b: Opportunity, sort: Sort) {
+  const dir = sort.dir === "asc" ? 1 : -1;
+  if (sort.key === "title") return a.title.localeCompare(b.title) * dir;
+  if (sort.key === "quantity") {
+    if (a.quantity == null && b.quantity == null) return 0;
+    if (a.quantity == null) return 1;
+    if (b.quantity == null) return -1;
+    return (a.quantity - b.quantity) * dir;
+  }
+  if (sort.key === "docs")
+    return (Number(a.docs === true) - Number(b.docs === true)) * dir;
+  return (
+    (Number((daysLeft(a.due) ?? 0) < 0) - Number((daysLeft(b.due) ?? 0) < 0) ||
+      (a.due || "9999").localeCompare(b.due || "9999")) * dir
+  );
+}
+function SortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+}: {
+  label: string;
+  column: Sort["key"];
+  sort: Sort;
+  onSort: (key: Sort["key"]) => void;
+}) {
+  const active = sort.key === column;
+  return (
+    <th aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        className={`sort-col${active ? " active" : ""}`}
+        onClick={() => onSort(column)}
+      >
+        {label}
+        <ChevronDown
+          size={11}
+          className={active && sort.dir === "asc" ? "up" : ""}
+          aria-hidden="true"
+        />
+      </button>
+    </th>
+  );
+}
 export default function Home() {
   const [rows, setRows] = useState<Opportunity[]>([]),
     [listing, setListing] = useState<Listing | null>(null),
@@ -50,7 +412,7 @@ export default function Home() {
     [view, setView] = useState("all"),
     [saved, setSaved] = useState<string[]>([]),
     [page, setPage] = useState(1),
-    [sort, setSort] = useState("due"),
+    [sort, setSort] = useState<Sort>({ key: "due", dir: "asc" }),
     [selected, setSelected] = useState<Opportunity | null>(null);
   const run = useRef(0);
   const search = useRef<HTMLInputElement>(null);
@@ -154,6 +516,7 @@ export default function Home() {
     if (!data.stored) void pull(date, id, false);
   }
   async function pull(date: string, id: number, keepCurrent: boolean) {
+    if (isPastIssueDate(date) && listing?.stored && listing.date === date) return;
     setSyncing(true);
     setError("");
     let all: Opportunity[] = [];
@@ -172,6 +535,16 @@ export default function Home() {
         if (id !== run.current) return;
         if (!response.ok)
           throw new Error(data.message || "Could not load DIBBS.");
+        if (data.skipped) {
+          setRows(data.rows || []);
+          setListing({
+            date,
+            total: data.total || 0,
+            fetchedAt: data.fetchedAt || null,
+            stored: true,
+          });
+          return;
+        }
         issueDates = data.dates?.length ? data.dates : issueDates;
         if (issueDates.length) setDates(issueDates);
         total = data.total;
@@ -217,6 +590,14 @@ export default function Home() {
     setFilters((f) => ({ ...f, [key]: value }));
     setPage(1);
   }
+  function chooseSort(key: Sort["key"]) {
+    setSort((current) =>
+      current.key === key
+        ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "docs" || key === "quantity" ? "desc" : "asc" },
+    );
+    setPage(1);
+  }
   function toggleSaved(id: string) {
     const next = saved.includes(id)
       ? saved.filter((s) => s !== id)
@@ -228,15 +609,16 @@ export default function Home() {
   }
   const filtered = useMemo(
     () =>
-      filterRows(rows, filters)
+      filterRows(rows, { ...filters, setAside: "" })
+        .filter(
+          (r) =>
+            !filters.setAside ||
+            setAsideParts(r.setAside).some(
+              (part) => part.label === filters.setAside,
+            ),
+        )
         .filter((r) => view !== "saved" || saved.includes(r.id))
-        .sort((a, b) =>
-          sort === "due"
-            ? (a.due || "9999").localeCompare(b.due || "9999")
-            : sort === "quantity"
-              ? (b.quantity ?? -1) - (a.quantity ?? -1)
-              : a.title.localeCompare(b.title),
-        ),
+        .sort((a, b) => compareRows(a, b, sort)),
     [rows, filters, view, saved, sort],
   );
   const pageCount = Math.max(1, Math.ceil(filtered.length / 25));
@@ -266,19 +648,23 @@ export default function Home() {
       "due",
       "status",
       "url",
+      "pdf",
     ] as const;
     const csv = [
       keys.join(","),
       ...filtered.map((r) =>
         keys
-          .map(
-            (k) =>
+          .map((k) => {
+            const value =
+              k === "pdf" ? r.pdf || pdfLink(r.solicitation) : r[k];
+            return (
               '"' +
-              String(r[k] ?? "")
+              String(value ?? "")
                 .replace(/^[=+@-]/, "'$&")
                 .replaceAll('"', '""') +
-              '"',
-          )
+              '"'
+            );
+          })
           .join(","),
       ),
     ].join("\r\n");
@@ -367,27 +753,14 @@ export default function Home() {
             >
               <Download size={16} /> Export CSV
             </button>
-            <button
-              className="button primary"
-              disabled={syncing || !listing?.date}
-              onClick={() => {
-                if (!listing?.date) return;
-                void pull(listing.date, ++run.current, true);
-              }}
-            >
-              <RefreshCw size={16} className={syncing ? "spin" : ""} />
-              {syncing ? "Updating…" : "Update"}
-            </button>
           </div>
         </section>
         <section className="stats" aria-label="Listing overview">
           <div>
             <span className="stat-label">
-              RFQs in this listing <Layers3 size={18} />
+              Opportunities <PackageOpen size={18} />
             </span>
-            <strong>
-              {(listing?.stored ? listing.total : rows.length).toLocaleString()}
-            </strong>
+            <strong>{rows.length.toLocaleString()}</strong>
             <small>
               {listing?.date
                 ? `Issued ${listing.date.replaceAll("-", " / ")}`
@@ -395,13 +768,6 @@ export default function Home() {
                   ? "Select an issue date"
                   : "Loading issue dates"}
             </small>
-          </div>
-          <div>
-            <span className="stat-label">
-              Opportunities <PackageOpen size={18} />
-            </span>
-            <strong>{rows.length.toLocaleString()}</strong>
-            <small>Saved for this issue date</small>
           </div>
           <div>
             <span className="stat-label">
@@ -437,62 +803,46 @@ export default function Home() {
                 Reset
               </button>
             </div>
-            <label>
-              Issue date
-              <select
-                aria-label="Issue date"
-                value={listing?.date || ""}
-                disabled={!dateOptions.length}
-                onChange={(e) => void choose(e.target.value)}
-              >
-                {!dateOptions.length && <option value="">Loading dates…</option>}
-                {dateOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <DateMenu
+              label="Issue date"
+              value={listing?.date ? issueToIso(listing.date) : ""}
+              allowed={dateOptions.map(issueToIso)}
+              emptyLabel="Loading dates…"
+              disabled={!dateOptions.length}
+              onChange={(iso) => void choose(isoToIssue(iso))}
+            />
+            <DateMenu
+              label="Quote deadline"
+              value={filters.due}
+              emptyLabel="Any deadline"
+              clearLabel="Any deadline"
+              onChange={(iso) => update("due", iso)}
+            />
             <div className="divider" />
-            <label>
-              Federal supply class
-              <select
-                value={filters.fsc}
-                onChange={(e) => update("fsc", e.target.value)}
-              >
-                <option value="">All categories</option>
-                {[...new Set(rows.map((r) => r.fsc))].sort().map((f) => (
-                  <option key={f} value={f}>
-                    FSC {f}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Set-aside
-              <select
-                value={filters.setAside}
-                onChange={(e) => update("setAside", e.target.value)}
-              >
-                <option value="">All set-asides</option>
-                {[...new Set(rows.map((r) => r.setAside))].sort().map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Quote deadline
-              <select
-                value={filters.due}
-                onChange={(e) => update("due", e.target.value)}
-              >
-                <option value="">Any deadline</option>
-                <option value="3">Within 3 days</option>
-                <option value="7">Within 7 days</option>
-                <option value="14">Within 14 days</option>
-                <option value="30">Within 30 days</option>
-              </select>
-            </label>
+            <OptionMenu
+              label="Federal supply class"
+              value={filters.fsc}
+              placeholder="All categories"
+              search
+              options={[...new Set(rows.map((r) => r.fsc))].sort().map((f) => ({
+                value: f,
+                label: `FSC ${f}`,
+              }))}
+              onChange={(fsc) => update("fsc", fsc)}
+            />
+            <OptionMenu
+              label="Set-aside"
+              value={filters.setAside}
+              placeholder="All set-asides"
+              options={setAsideParts(rows.map((r) => r.setAside).join(" ")).map(
+                (part) => ({
+                  value: part.label,
+                  label: part.label,
+                  icons: [part.icon],
+                }),
+              )}
+              onChange={(setAside) => update("setAside", setAside)}
+            />
             <label>
               Minimum quantity
               <input
@@ -553,18 +903,6 @@ export default function Home() {
                   <kbd>⌘ K</kbd>
                 )}
               </div>
-              <label className="sort">
-                <ArrowDownUp size={15} />
-                <select
-                  aria-label="Sort opportunities"
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value)}
-                >
-                  <option value="due">Due soonest</option>
-                  <option value="name">Item name</option>
-                  <option value="quantity">Largest quantity</option>
-                </select>
-              </label>
             </div>
             <div className="results-heading">
               <div>
@@ -582,10 +920,37 @@ export default function Home() {
                       : "Choose an issue date"}
                 </p>
               </div>
-              <span className="open-tag">
-                <span className="dot" />
-                {syncing ? "Updating" : listing?.stored ? "Saved" : "DIBBS"}
-              </span>
+              <div className="freshness">
+                <span className="open-tag">
+                  <span className="dot" />
+                  {syncing
+                    ? "Updating"
+                    : listing?.stored
+                      ? "Up to date"
+                      : "DIBBS"}
+                </span>
+                <button
+                  className="refresh"
+                  aria-label={
+                    listing?.stored && isPastIssueDate(listing.date)
+                      ? "Past issue date already saved"
+                      : syncing
+                        ? "Updating this issue date"
+                        : "Update this issue date"
+                  }
+                  disabled={
+                    syncing ||
+                    !listing?.date ||
+                    (listing.stored && isPastIssueDate(listing.date))
+                  }
+                  onClick={() => {
+                    if (!listing?.date) return;
+                    void pull(listing.date, ++run.current, true);
+                  }}
+                >
+                  <RefreshCw size={14} className={syncing ? "spin" : ""} />
+                </button>
+              </div>
             </div>
             {error && (
               <div className="error" role="alert">
@@ -610,11 +975,32 @@ export default function Home() {
                       <Bookmark size={14} />
                       <span className="sr-only">Save</span>
                     </th>
-                    <th>ITEM / NSN</th>
-                    <th>QUANTITY</th>
+                    <SortHeader
+                      label="ITEM / NSN"
+                      column="title"
+                      sort={sort}
+                      onSort={chooseSort}
+                    />
+                    <SortHeader
+                      label="QUANTITY"
+                      column="quantity"
+                      sort={sort}
+                      onSort={chooseSort}
+                    />
                     <th>SET-ASIDE</th>
-                    <th>TECH DOCS</th>
-                    <th>RETURN BY</th>
+                    <SortHeader
+                      label="TECH DOCS"
+                      column="docs"
+                      sort={sort}
+                      onSort={chooseSort}
+                    />
+                    <th>PDF</th>
+                    <SortHeader
+                      label="RETURN BY"
+                      column="due"
+                      sort={sort}
+                      onSort={chooseSort}
+                    />
                     <th>
                       <span className="sr-only">Details</span>
                     </th>
@@ -623,8 +1009,12 @@ export default function Home() {
                 <tbody>
                   {visible.map((r) => {
                     const days = daysLeft(r.due);
+                    const pdf = r.pdf || pdfLink(r.solicitation);
                     return (
-                      <tr key={r.id}>
+                      <tr
+                        key={r.id}
+                        className={days !== null && days < 0 ? "past" : ""}
+                      >
                         <td>
                           <button
                             className={`save ${saved.includes(r.id) ? "saved" : ""}`}
@@ -654,11 +1044,7 @@ export default function Home() {
                           <small>{r.unit || "See package for unit"}</small>
                         </td>
                         <td>
-                          <span
-                            className={`badge ${r.setAside === "Unrestricted" ? "neutral" : "blue"}`}
-                          >
-                            {r.setAside}
-                          </span>
+                          <SetAsideLabel value={r.setAside} />
                         </td>
                         <td>
                           {r.docs ? (
@@ -671,21 +1057,41 @@ export default function Home() {
                             </span>
                           )}
                         </td>
+                        <td>
+                          {pdf ? (
+                            <a
+                              className="pdf-link"
+                              href={pdf}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Open ${r.solicitation} PDF`}
+                            >
+                              <FileText size={14} />
+                            </a>
+                          ) : (
+                            <span className="muted">None</span>
+                          )}
+                        </td>
                         <td className="due">
                           <strong>{formatDate(r.due)}</strong>
-                          <small
-                            className={
-                              days !== null && days <= 3 ? "urgent" : ""
-                            }
-                          >
-                            {days === null
-                              ? "Check source"
-                              : days < 0
-                                ? "Closed"
+                          {days !== null && days < 0 ? (
+                            <span className="badge red">
+                              <Clock3 size={12} aria-hidden="true" />
+                              Past due
+                            </span>
+                          ) : (
+                            <small
+                              className={
+                                days !== null && days <= 3 ? "urgent" : ""
+                              }
+                            >
+                              {days === null
+                                ? "Check source"
                                 : days === 0
                                   ? "Due today"
                                   : `${days} days left`}
-                          </small>
+                            </small>
+                          )}
                         </td>
                         <td>
                           <a
@@ -811,7 +1217,22 @@ export default function Home() {
               ].map(([k, v]) => (
                 <div key={k}>
                   <dt>{k}</dt>
-                  <dd>{v}</dd>
+                  <dd>
+                    {k === "Set-aside" ? (
+                      <SetAsideLabel value={v} />
+                    ) : k === "Return by" &&
+                      (daysLeft(selected.due) ?? 0) < 0 ? (
+                      <span className="past-date">
+                        {v}
+                        <span className="badge red">
+                          <Clock3 size={12} aria-hidden="true" />
+                          Past due
+                        </span>
+                      </span>
+                    ) : (
+                      v
+                    )}
+                  </dd>
                 </div>
               ))}
             </dl>
@@ -819,14 +1240,26 @@ export default function Home() {
               Confirm the unit of issue, delivery schedule, specifications, and
               eligibility in the original solicitation.
             </p>
-            <a
-              className="button primary"
-              href={selected.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View original DIBBS package <ArrowUpRight size={16} />
-            </a>
+            <div className="detail-actions">
+              {(selected.pdf || pdfLink(selected.solicitation)) && (
+                <a
+                  className="button"
+                  href={selected.pdf || pdfLink(selected.solicitation) || undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open solicitation PDF <FileText size={16} />
+                </a>
+              )}
+              <a
+                className="button primary"
+                href={selected.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View original DIBBS package <ArrowUpRight size={16} />
+              </a>
+            </div>
           </>
         )}
       </dialog>

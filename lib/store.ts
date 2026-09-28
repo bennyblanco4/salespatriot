@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Opportunity } from "./opportunities";
+import { isPastIssueDate, type Opportunity } from "./opportunities";
 
 export type StoredDay = {
   date: string;
@@ -86,6 +86,13 @@ export function saveDay(day: StoredDay) {
       day.source,
       JSON.stringify(day.rows),
     );
+}
+
+export function savedPastDay(date: string, today?: string): StoredDay | null {
+  if (!isPastIssueDate(date, today)) return null;
+  const day = loadDay(date);
+  if (!day || day.total < 1 || day.rows.length < day.total) return null;
+  return day;
 }
 
 export function loadDay(date: string): StoredDay | null {

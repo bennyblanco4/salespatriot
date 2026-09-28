@@ -19,6 +19,10 @@ test("extracts the 50 real DIBBS records and their actual fields", () => {
   assert.equal(rows[0].status, "Open");
   assert.equal(rows[0].docs, false);
   assert.match(rows[0].url, /rfqrec.aspx\?sn=SPE1C126T1800/);
+  assert.equal(
+    rows[0].pdf,
+    "https://dibbs2.bsm.dla.mil/Downloads/RFQ/0/SPE1C126T1800.PDF",
+  );
 });
 test("notice and error pages cannot become fabricated records", () => {
   assert.deepEqual(parseRfqHtml("<html>Notice</html>"), []);
@@ -26,6 +30,10 @@ test("notice and error pages cannot become fabricated records", () => {
 test("source links are restricted to the original trusted source", () => {
   assert.equal(safeLink("javascript:alert(1)"), null);
   assert.equal(safeLink("https://evil.test/"), null);
+  assert.equal(
+    safeLink("https://dibbs2.bsm.dla.mil/Downloads/RFQ/0/SPE1C126T1800.PDF"),
+    "https://dibbs2.bsm.dla.mil/Downloads/RFQ/0/SPE1C126T1800.PDF",
+  );
 });
 test("form state is preserved for postback pagination", () => {
   const form = formFields(html);
@@ -57,10 +65,27 @@ test("filters combine and exclude closed source status", () => {
     0,
   );
   assert.equal(
-    filterRows([{ ...row, status: "Closed" }], initialFilters).length,
+    filterRows([{ ...row, status: "Closed" }], {
+      ...initialFilters,
+      open: true,
+    }).length,
     0,
   );
+  assert.equal(
+    filterRows([{ ...row, due: "2020-01-01" }], initialFilters).length,
+    1,
+  );
   assert.equal(filterRows([row], { ...initialFilters, docs: true }).length, 0);
+  assert.equal(
+    filterRows(
+      [
+        { ...row, due: "2026-10-08" },
+        { ...row, id: "other", due: "2026-11-01" },
+      ],
+      { ...initialFilters, due: "2026-10-08" },
+    ).length,
+    1,
+  );
 });
 test("deadline math uses calendar dates", () => {
   assert.equal(daysLeft("2026-10-01", "2026-09-28"), 3);
