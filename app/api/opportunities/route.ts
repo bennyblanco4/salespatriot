@@ -40,7 +40,7 @@ export async function GET(request: Request) {
         { message: "Invalid date or page." },
         { status: 400 },
       );
-    const saved = date ? savedPastDay(date) : null;
+    const saved = date ? await savedPastDay(date) : null;
     if (saved)
       return Response.json(
         {
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
           pages: 1,
           fetchedAt: saved.fetchedAt,
           source: saved.source,
-          dates: loadDates(),
+          dates: await loadDates(),
         },
         { headers: { "Cache-Control": "no-store" } },
       );
@@ -68,7 +68,7 @@ export async function GET(request: Request) {
       const feed = await pending.get(key)!;
       if (cache.size >= 300) cache.delete(cache.keys().next().value!);
       cache.set(key, { feed, at: Date.now() });
-      if (page === 1 && feed.dates.length) saveDates(feed.dates);
+      if (page === 1 && feed.dates.length) await saveDates(feed.dates);
       return Response.json(
         { ...feed, cached: false },
         { headers: { "Cache-Control": "no-store" } },
@@ -86,9 +86,9 @@ export async function GET(request: Request) {
     }
   }
 
-  const dates = loadDates();
+  const dates = await loadDates();
   const selected = date || dates[0] || "";
-  const day = selected ? loadDay(selected) : null;
+  const day = selected ? await loadDay(selected) : null;
   return Response.json(
     {
       dates,
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   if (!Array.isArray(data.rows) || data.rows.length > 20000)
     return Response.json({ message: "Invalid listing." }, { status: 400 });
   const rows = data.rows.filter(isOpportunity);
-  const existing = savedPastDay(data.date);
+  const existing = await savedPastDay(data.date);
   if (existing)
     return Response.json(
       {
@@ -130,7 +130,7 @@ export async function POST(request: Request) {
       },
       { headers: { "Cache-Control": "no-store" } },
     );
-  saveDay({
+  await saveDay({
     date: data.date,
     rows,
     total: typeof data.total === "number" ? data.total : rows.length,
@@ -142,7 +142,7 @@ export async function POST(request: Request) {
     source: typeof data.source === "string" ? data.source : "",
   });
   if (Array.isArray(data.dates))
-    saveDates(data.dates.filter((date): date is string => typeof date === "string"));
+    await saveDates(data.dates.filter((date): date is string => typeof date === "string"));
   return Response.json(
     { ok: true, date: data.date, count: rows.length },
     { headers: { "Cache-Control": "no-store" } },

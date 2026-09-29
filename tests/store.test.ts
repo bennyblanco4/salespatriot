@@ -28,9 +28,9 @@ test("saves a daily listing and the other issue dates", async () => {
   const { saveDates, loadDates, saveDay, loadDay, savedPastDay } = await import(
     "../lib/store"
   );
-  saveDates(["09-28-2026", "09-27-2026"]);
-  assert.deepEqual(loadDates(), ["09-28-2026", "09-27-2026"]);
-  saveDay({
+  await saveDates(["09-28-2026", "09-27-2026"]);
+  assert.deepEqual(await loadDates(), ["09-28-2026", "09-27-2026"]);
+  await saveDay({
     date: "09-27-2026",
     rows: [row],
     total: 1,
@@ -38,13 +38,13 @@ test("saves a daily listing and the other issue dates", async () => {
     fetchedAt: "2026-09-28T12:00:00.000Z",
     source: "https://www.dibbs.bsm.dla.mil/RFQ/",
   });
-  assert.equal(loadDay("09-28-2026"), null);
-  assert.equal(loadDay("09-27-2026")?.rows[0].solicitation, row.solicitation);
-  saveDates(["09-26-2026"]);
-  assert.deepEqual(loadDates(), ["09-26-2026"]);
-  assert.equal(savedPastDay("09-27-2026", "2026-09-28")?.rows.length, 1);
-  assert.equal(savedPastDay("09-28-2026", "2026-09-28"), null);
-  saveDay({
+  assert.equal(await loadDay("09-28-2026"), null);
+  assert.equal((await loadDay("09-27-2026"))?.rows[0].solicitation, row.solicitation);
+  await saveDates(["09-26-2026"]);
+  assert.deepEqual(await loadDates(), ["09-26-2026"]);
+  assert.equal((await savedPastDay("09-27-2026", "2026-09-28"))?.rows.length, 1);
+  assert.equal(await savedPastDay("09-28-2026", "2026-09-28"), null);
+  await saveDay({
     date: "09-26-2026",
     rows: [row],
     total: 10,
@@ -52,5 +52,5 @@ test("saves a daily listing and the other issue dates", async () => {
     fetchedAt: "2026-09-28T12:00:00.000Z",
     source: "https://www.dibbs.bsm.dla.mil/RFQ/",
   });
-  assert.equal(savedPastDay("09-26-2026", "2026-09-28"), null);
+  assert.equal(await savedPastDay("09-26-2026", "2026-09-28"), null);
 });

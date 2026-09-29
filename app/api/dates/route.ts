@@ -8,13 +8,13 @@ export async function GET() {
   try {
     const dates = await listIssueDates();
     if (!dates.length) throw new Error("No issue dates were published.");
-    saveDates(dates);
+    await saveDates(dates);
     return Response.json(
       { dates },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
-    const dates = loadDates();
+    const dates = await loadDates();
     if (dates.length)
       return Response.json(
         { dates, cached: true },
