@@ -1,0 +1,65 @@
+# Deploys this repo to the existing Heroku app when commits land on main
+# (merge or push). Nothing in this file is a credential.
+#
+# Before the first deploy, add these in GitHub → Settings → Secrets and variables → Actions:
+#   HEROKU_API_KEY    repository secret. Heroku account API key. Never commit it.
+#   HEROKU_APP_NAME   repository variable, or a secret with the same name.
+#                     The existing app name only, not a new app.
+name: Deploy to Heroku
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heroku-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  deploy:
+    name: Deploy production
+    needs: test
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      HEROKU_APP_NAME: ${{ vars.HEROKU_APP_NAME || secrets.HEROKU_APP_NAME }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Deploy to Heroku
+        run: bash .github/scripts/heroku-deploy.sh
