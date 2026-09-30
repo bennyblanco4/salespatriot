@@ -373,6 +373,110 @@ function compareRows(a: Opportunity, b: Opportunity, sort: Sort) {
       (a.due || "9999").localeCompare(b.due || "9999")) * dir
   );
 }
+function OpportunityCard({
+  row,
+  saved,
+  onSave,
+  onOpen,
+}: {
+  row: Opportunity;
+  saved: boolean;
+  onSave: () => void;
+  onOpen: () => void;
+}) {
+  const days = daysLeft(row.due);
+  const pdf = row.pdf || pdfLink(row.solicitation);
+  const past = days !== null && days < 0;
+  return (
+    <article className={`opp-card${past ? " past" : ""}`}>
+      <div className="opp-card-top">
+        <button
+          type="button"
+          className={`save${saved ? " saved" : ""}`}
+          aria-label={`${saved ? "Unsave" : "Save"} ${row.title}`}
+          aria-pressed={saved}
+          onClick={onSave}
+        >
+          <Bookmark size={18} fill={saved ? "currentColor" : "none"} />
+        </button>
+        <div className="item">
+          <button type="button" onClick={onOpen}>
+            {row.title}
+          </button>
+          <span className="mono">
+            {row.nsn} <em>FSC {row.fsc}</em>
+          </span>
+          <small>
+            {row.solicitation} · PR {row.purchaseRequest}
+          </small>
+        </div>
+        <a
+          className="external"
+          href={row.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${row.solicitation} on DIBBS`}
+        >
+          <ArrowUpRight size={18} />
+        </a>
+      </div>
+      <div className="opp-facts">
+        <div>
+          <span>Quantity</span>
+          <strong>{row.quantity?.toLocaleString() ?? "—"}</strong>
+          <small>{row.unit || "See package for unit"}</small>
+        </div>
+        <div className="due">
+          <span>Return by</span>
+          <strong>{formatDate(row.due)}</strong>
+          {past ? (
+            <span className="badge red">
+              <Clock3 size={12} aria-hidden="true" />
+              Past due
+            </span>
+          ) : (
+            <small className={days !== null && days <= 3 ? "urgent" : ""}>
+              {days === null
+                ? "Check source"
+                : days === 0
+                  ? "Due today"
+                  : `${days} days left`}
+            </small>
+          )}
+        </div>
+        <div>
+          <span>Tech docs</span>
+          {row.docs ? (
+            <span className="docs">
+              <FileText size={14} /> Available
+            </span>
+          ) : (
+            <strong className="muted">
+              {row.docs === false ? "None listed" : "Unknown"}
+            </strong>
+          )}
+        </div>
+        <div>
+          <span>PDF</span>
+          {pdf ? (
+            <a
+              className="pdf-link"
+              href={pdf}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open ${row.solicitation} PDF`}
+            >
+              <FileText size={14} /> Open PDF
+            </a>
+          ) : (
+            <strong className="muted">None</strong>
+          )}
+        </div>
+      </div>
+      <SetAsideLabel value={row.setAside} />
+    </article>
+  );
+}
 function SortHeader({
   label,
   column,
@@ -413,7 +517,8 @@ export default function Home() {
     [saved, setSaved] = useState<string[]>([]),
     [page, setPage] = useState(1),
     [sort, setSort] = useState<Sort>({ key: "due", dir: "asc" }),
-    [selected, setSelected] = useState<Opportunity | null>(null);
+    [selected, setSelected] = useState<Opportunity | null>(null),
+    [filtersOpen, setFiltersOpen] = useState(false);
   const run = useRef(0);
   const search = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -788,7 +893,33 @@ export default function Home() {
           </div>
         </section>
         <section className="workspace">
-          <aside className="filters">
+          <button
+            type="button"
+            className="filters-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="refine-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <span className="filters-toggle-label">
+              <Filter size={16} />
+              {filtersOpen ? "Hide filters" : "Refine results"}
+              {active > 0 ? <span className="count">{active}</span> : null}
+            </span>
+            <span className="filters-toggle-meta">
+              {listing?.date
+                ? listing.date.replaceAll("-", " / ")
+                : "Issue date"}
+              <ChevronDown
+                size={16}
+                className={filtersOpen ? "up" : ""}
+                aria-hidden="true"
+              />
+            </span>
+          </button>
+          <aside
+            id="refine-panel"
+            className={`filters${filtersOpen ? " open" : ""}`}
+          >
             <div className="filter-title">
               <h2>
                 <Filter size={16} /> Refine results
@@ -920,6 +1051,30 @@ export default function Home() {
                       : "Choose an issue date"}
                 </p>
               </div>
+              <label className="mobile-sort">
+                Sort
+                <select
+                  aria-label="Sort opportunities"
+                  value={`${sort.key}:${sort.dir}`}
+                  onChange={(event) => {
+                    const [key, dir] = event.target.value.split(":") as [
+                      Sort["key"],
+                      Sort["dir"],
+                    ];
+                    setSort({ key, dir });
+                    setPage(1);
+                  }}
+                >
+                  <option value="due:asc">Return by, soonest</option>
+                  <option value="due:desc">Return by, latest</option>
+                  <option value="title:asc">Item name, A to Z</option>
+                  <option value="title:desc">Item name, Z to A</option>
+                  <option value="quantity:desc">Quantity, high to low</option>
+                  <option value="quantity:asc">Quantity, low to high</option>
+                  <option value="docs:desc">Tech docs available first</option>
+                  <option value="docs:asc">Tech docs available last</option>
+                </select>
+              </label>
               <div className="freshness">
                 <span className="open-tag">
                   <span className="dot" />
@@ -1109,6 +1264,17 @@ export default function Home() {
                   })}
                 </tbody>
               </table>
+            </div>
+            <div className="opp-cards">
+              {visible.map((row) => (
+                <OpportunityCard
+                  key={row.id}
+                  row={row}
+                  saved={saved.includes(row.id)}
+                  onSave={() => toggleSaved(row.id)}
+                  onOpen={() => show(row)}
+                />
+              ))}
             </div>
             {!visible.length && (
               <div className="empty">
